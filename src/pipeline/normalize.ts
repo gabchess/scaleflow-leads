@@ -9,6 +9,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CountrySchema, type Company } from "../icp.js";
+import { toCsvField } from "./csv.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
@@ -284,12 +285,6 @@ export function dedupeByDomain(rows: NormalizedRow[]): NormalizedRow[] {
   return [...byDomain.values(), ...withoutDomain];
 }
 
-function csvEscape(value: string | number | boolean | null): string {
-  const text = value == null ? "" : String(value);
-  if (/[",\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
-  return text;
-}
-
 export function toCsv(rows: NormalizedRow[]): string {
   const headers = [
     "name",
@@ -324,23 +319,36 @@ export function toCsv(rows: NormalizedRow[]): string {
         row.source,
         row.origin_url,
       ]
-        .map(csvEscape)
+        .map(toCsvField)
         .join(","),
     );
   }
   return `${lines.join("\n")}\n`;
 }
 
+/** A missing capture means that scraper has not run. It is skipped with a
+ * message rather than treated as an empty result. */
+async function readCaptureOrEmpty<T>(rel: string): Promise<T[]> {
+  try {
+    return JSON.parse(await readFile(path.join(REPO_ROOT, rel), "utf8")) as T[];
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    console.log(`No capture at ${rel}, skipping that source.`);
+    return [];
+  }
+}
+
 export async function runNormalize(): Promise<{
   rows: NormalizedRow[];
   outPath: string;
 }> {
-  const clutchRaw = JSON.parse(
-    await readFile(path.join(REPO_ROOT, CLUTCH_REL), "utf8"),
-  ) as ClutchRaw[];
-  const crunchRaw = JSON.parse(
-    await readFile(path.join(REPO_ROOT, CRUNCHBASE_REL), "utf8"),
-  ) as CrunchbaseRaw[];
+  const clutchRaw = await readCaptureOrEmpty<ClutchRaw>(CLUTCH_REL);
+  const crunchRaw = await readCaptureOrEmpty<CrunchbaseRaw>(CRUNCHBASE_REL);
+  if (clutchRaw.length === 0 && crunchRaw.length === 0) {
+    throw new Error(
+      `No captures in data/raw/. Run pnpm scrape:clutch or pnpm scrape:crunchbase first. ${OUTPUT_REL} was left untouched.`,
+    );
+  }
   const clutch = clutchRaw
     .map(normalizeClutchRow)
     .filter((r): r is NormalizedRow => r != null);

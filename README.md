@@ -42,13 +42,13 @@ src/pipeline/finalize.ts     Join Clay output, MX check, drop non-sales titles, 
 ```bash
 pnpm install
 npx playwright install chromium
-pnpm test                                # 38 tests, including one that parses every shipped row against the lead schema
+pnpm test                                # 42 tests, including one that parses every shipped row against the lead schema
 pnpm scrape:clutch
 pnpm scrape:crunchbase                   # needs .crunchbase.storageState.json from a logged-in trial session
 pnpm normalize                           # writes data/companies.csv
 pnpm finalize path/to/clay-export.csv    # writes data/leads_final.csv
 pnpm mcp
-pnpm agent
+pnpm agent                               # reads data/companies.csv, so it runs on a fresh clone
 ```
 
 The signal step needs `APIFY_TOKEN`. The Clay step ran through Clay's MCP server and is not scripted here.

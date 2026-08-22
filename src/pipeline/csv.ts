@@ -27,8 +27,13 @@ export function parseCsvLine(line: string): string[] {
   return out.map((s) => s.replace(/\r$/, "").trim());
 }
 
+/** A cell that starts with = + - @ or a tab runs as a formula when the file
+ * opens in Excel or Sheets (CWE-1236). Every text field here comes from a
+ * scraped page or an enrichment vendor, so the leading character is
+ * neutralized with a quote, which spreadsheets read as "this is text". */
 export function toCsvField(value: unknown): string {
-  const s = value == null ? "" : String(value);
+  const raw = value == null ? "" : String(value);
+  const s = /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 

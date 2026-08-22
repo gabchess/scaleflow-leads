@@ -140,7 +140,7 @@ async function main(): Promise<void> {
       sales_owner_title: row.dm_title ?? "",
       email: row.email ?? "",
       email_status: emailStatus,
-      signal_tier: row.signal_tier ?? "tier_3",
+      signal_tier: row.signal_tier || "tier_3",
       signal_type:
         hasHiring && hasPost
           ? "both"

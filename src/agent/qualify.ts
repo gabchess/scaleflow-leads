@@ -43,7 +43,6 @@ type Candidate = {
   headcount_low_edge: number | null;
   headcount_ambiguous: boolean;
   company_type: string | null;
-  industry: string | null;
   url: string;
 };
 

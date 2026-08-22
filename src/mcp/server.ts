@@ -5,11 +5,12 @@
  * qualification. The agent in src/agent/qualify.ts is the first consumer.
  *
  * Honesty note on naming: `scrape_crunchbase` and `scrape_clutch` read the
- * capture files the Playwright scrapers produced. They do not open a browser.
- * Every response carries `captured_at` so the caller can see how old the data
- * is instead of assuming it is live.
+ * normalized rows in data/companies.csv that the Playwright scrapers and
+ * normalize.ts produced. They do not open a browser. Every response carries
+ * `normalized_at`, the file's modification time, so the caller can see how
+ * old the data is instead of assuming it is live.
  */
-import { readFile } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
@@ -17,53 +18,26 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { scoreLead, type ScoreInput } from "../scoring.js";
 import { CompanyTypeSchema, CountrySchema } from "../icp.js";
-import { inferCompanyType } from "../pipeline/normalize.js";
+import { readCsv } from "../pipeline/csv.js";
 
 const REPO_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../..",
 );
+const COMPANIES_PATH = path.join(REPO_ROOT, "data", "companies.csv");
+const SIGNALS_PATH = path.join(REPO_ROOT, "data", "companies_signals.csv");
+const NO_SIGNAL = "no verifiable signal found";
 
-type RawCompany = {
-  name: string;
-  domain: string | null;
-  country: string | null;
-  headquarters: string | null;
-  headcount: string | number | null;
-  industry: string | null;
-  funding: string | null;
-  url: string;
-  source: string;
-  captured_at: string;
-};
+type Table = { rows: Array<Record<string, string>>; modifiedAt: string };
 
-type SignalRecord = {
-  domain: string;
-  hiring_signal: boolean;
-  post_signal: boolean;
-  signal_url?: string;
-  captured_at?: string;
-};
-
-async function readCapture(file: string): Promise<RawCompany[]> {
-  const full = path.join(REPO_ROOT, "data", "raw", file);
+async function readTable(file: string): Promise<Table | null> {
   try {
-    const parsed: unknown = JSON.parse(await readFile(full, "utf8"));
-    return Array.isArray(parsed) ? (parsed as RawCompany[]) : [];
+    const [rows, info] = await Promise.all([readCsv(file), stat(file)]);
+    return { rows, modifiedAt: info.mtime.toISOString() };
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw err;
   }
-}
-
-/** Crunchbase usually reports headcount as a band. Only the low edge is
- * recoverable, so 101-250 maps to 101 and stays flagged as ambiguous for the
- * caller. A raw number, when present, is used as is. */
-function headcountLowEdge(raw: string | number | null): number | null {
-  if (typeof raw === "number") return Number.isFinite(raw) ? raw : null;
-  if (!raw) return null;
-  const match = /(\d+)/.exec(String(raw));
-  return match ? Number(match[1]) : null;
 }
 
 function toToolResult(payload: unknown) {
@@ -93,35 +67,36 @@ const filterShape = {
     .describe("drop rows whose low edge exceeds this"),
 };
 
-function buildCaptureTool(file: string, label: string) {
+function buildCaptureTool(source: "crunchbase" | "clutch") {
   return async (args: {
     limit: number;
     country?: string;
     company_type?: string;
     max_headcount?: number;
   }) => {
-    const rows = await readCapture(file);
-    if (rows.length === 0) {
+    const table = await readTable(COMPANIES_PATH);
+    const rows = table?.rows.filter((row) => row.source === source) ?? [];
+    if (!table || rows.length === 0) {
       return toToolResult({
-        source: label,
+        source,
         available: false,
-        note: `data/raw/${file} does not exist yet. Run the ${label} scraper first.`,
+        note: `data/companies.csv has no ${source} rows yet. Run the ${source} scraper, then pnpm normalize.`,
         companies: [],
       });
     }
 
     const enriched = rows.map((row) => ({
-      name: row.name,
-      domain: row.domain,
-      country: row.country,
-      headcount_raw: row.headcount,
-      headcount_low_edge: headcountLowEdge(row.headcount),
-      headcount_ambiguous: String(row.headcount ?? "").includes("101-250"),
-      company_type: inferCompanyType(row.industry),
-      industry: row.industry,
-      funding: row.funding,
-      url: row.url,
-      captured_at: row.captured_at,
+      name: row.name ?? "",
+      domain: row.domain || null,
+      country: row.country || null,
+      headcount_raw: row.headcount_raw || null,
+      headcount_low_edge: row.headcount_low_edge
+        ? Number(row.headcount_low_edge)
+        : null,
+      headcount_ambiguous: row.headcount_ambiguous === "true",
+      company_type: row.company_type || null,
+      funding_usd: row.funding_usd ? Number(row.funding_usd) : null,
+      url: row.origin_url ?? "",
     }));
 
     const filtered = enriched.filter((row) => {
@@ -136,12 +111,12 @@ function buildCaptureTool(file: string, label: string) {
     });
 
     return toToolResult({
-      source: label,
+      source,
       available: true,
       total_captured: rows.length,
       matched: filtered.length,
       returned: Math.min(filtered.length, args.limit),
-      captured_at: rows[0]?.captured_at ?? null,
+      normalized_at: table.modifiedAt,
       companies: filtered.slice(0, args.limit),
     });
   };
@@ -154,10 +129,10 @@ server.registerTool(
   {
     title: "Read the Crunchbase capture",
     description:
-      "Returns companies captured from the Crunchbase saved search, with optional ICP filters. Reads data/raw/crunchbase.json produced by the Playwright scraper. Does not open a browser.",
+      "Returns companies captured from the Crunchbase saved search, with optional ICP filters. Reads the crunchbase rows of data/companies.csv, the normalized output of the Playwright scraper. Does not open a browser.",
     inputSchema: filterShape,
   },
-  buildCaptureTool("crunchbase.json", "crunchbase"),
+  buildCaptureTool("crunchbase"),
 );
 
 server.registerTool(
@@ -165,10 +140,10 @@ server.registerTool(
   {
     title: "Read the Clutch capture",
     description:
-      "Returns companies captured from Clutch.co directory listings, with optional ICP filters. Reads data/raw/clutch.json. Reports available:false when the capture does not exist yet, instead of an empty list that would look like a real zero result.",
+      "Returns companies captured from Clutch.co directory listings, with optional ICP filters. Reads the clutch rows of data/companies.csv. Reports available:false when there are none yet, instead of an empty list that would look like a real zero result.",
     inputSchema: filterShape,
   },
-  buildCaptureTool("clutch.json", "clutch"),
+  buildCaptureTool("clutch"),
 );
 
 server.registerTool(
@@ -176,7 +151,7 @@ server.registerTool(
   {
     title: "Look up intent signals for a domain",
     description:
-      "Returns the hiring signal and the post signal for one company domain, from data/raw/signals.json. Returns known:false when the domain has not been checked, which is different from a company that was checked and has no signal.",
+      "Returns the hiring signal and the post signal for one company domain, from data/companies_signals.csv. Returns known:false when the domain has not been checked, which is different from a company that was checked and has no signal.",
     inputSchema: {
       domain: z
         .string()
@@ -185,22 +160,19 @@ server.registerTool(
     },
   },
   async ({ domain }: { domain: string }) => {
-    const full = path.join(REPO_ROOT, "data", "raw", "signals.json");
-    let records: SignalRecord[] = [];
-    try {
-      const parsed: unknown = JSON.parse(await readFile(full, "utf8"));
-      if (Array.isArray(parsed)) records = parsed as SignalRecord[];
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    const table = await readTable(SIGNALS_PATH);
+    if (!table) {
       return toToolResult({
         domain,
         known: false,
-        note: "data/raw/signals.json does not exist yet. Run the intent signal step first.",
+        note: "data/companies_signals.csv does not exist yet. Run the intent signal step first.",
       });
     }
 
     const wanted = domain.toLowerCase().replace(/^www\./, "");
-    const hit = records.find((r) => r.domain?.toLowerCase() === wanted);
+    const hit = table.rows.find(
+      (row) => (row.domain ?? "").toLowerCase() === wanted,
+    );
     if (!hit) {
       return toToolResult({
         domain: wanted,
@@ -208,21 +180,19 @@ server.registerTool(
         note: "domain not checked yet",
       });
     }
+    const hasSignal = (text: string | undefined): boolean =>
+      Boolean(text) && text !== NO_SIGNAL;
+    const hiring = hasSignal(hit.hiring_signal);
+    const post = hasSignal(hit.post_signal);
     return toToolResult({
       domain: wanted,
       known: true,
-      hiring_signal: hit.hiring_signal === true,
-      post_signal: hit.post_signal === true,
-      signal_url: hit.signal_url ?? null,
+      hiring_signal: hiring,
+      post_signal: post,
+      signal_url: hit.signal_url || null,
       signal_type:
-        hit.hiring_signal && hit.post_signal
-          ? "both"
-          : hit.hiring_signal
-            ? "hiring"
-            : hit.post_signal
-              ? "post"
-              : "none",
-      captured_at: hit.captured_at ?? null,
+        hiring && post ? "both" : hiring ? "hiring" : post ? "post" : "none",
+      checked_at: table.modifiedAt,
     });
   },
 );
