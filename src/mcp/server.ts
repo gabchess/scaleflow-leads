@@ -35,8 +35,13 @@ async function readTable(file: string): Promise<Table | null> {
     const [rows, info] = await Promise.all([readCsv(file), stat(file)]);
     return { rows, modifiedAt: info.mtime.toISOString() };
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw err;
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return null;
+    // Rewrapped on purpose. A raw fs error carries the absolute path, and this
+    // runs as an MCP server whose errors go back to whoever called the tool.
+    throw new Error(
+      `could not read ${path.basename(file)} (${code ?? "unknown error"})`,
+    );
   }
 }
 
