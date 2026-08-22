@@ -2,7 +2,7 @@
 
 100 leads for ScaleFlow AI, an email warmup and deliverability product. Built for the Revenue Inc GTM Engineer take-home, 20 to 22 August 2026.
 
-**[Two-minute walkthrough (Loom)](https://www.loom.com/share/320038e70c3b4ba29ad5265a3e83fef3)**  ·  **The list: [`data/leads_final.csv`](data/leads_final.csv)**
+**[Loom walkthrough](https://www.loom.com/share/320038e70c3b4ba29ad5265a3e83fef3)**  ·  **The list: [`data/leads_final.csv`](data/leads_final.csv)**
 
 | | |
 |---|---|
