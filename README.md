@@ -1,6 +1,15 @@
-# ScaleFlow AI lead list
+# ScaleFlow: a GTM lead pipeline you can fork
 
-100 leads for ScaleFlow AI, an email warmup and deliverability product. Built for the Revenue Inc GTM Engineer take-home, 20 to 22 August 2026.
+An augment: a pipeline plus the playbook that teaches an AI assistant to run it. Fork
+it, run `/onboard` in Claude Code, set your own ICP in the gates, drop in your keys,
+and it finds qualified leads for YOUR customer profile. The gates disqualify rather
+than score: dead site, info@ only, nobody who owns sales.
+
+Provenance, stated plainly: built in 48 hours as the Revenue Inc GTM Engineer
+take-home (20 to 22 August 2026), producing 100 leads for ScaleFlow AI, an email
+warmup product. The shipped run is the proof; the pipeline is the product. What
+failed while building it is in [WHAT-BROKE.md](WHAT-BROKE.md), because the failures
+shaped the design more than the plan did.
 
 **[Loom walkthrough](https://www.loom.com/share/320038e70c3b4ba29ad5265a3e83fef3)**  ·  **The list: [`data/leads_final.csv`](data/leads_final.csv)**
 
@@ -51,4 +60,13 @@ pnpm mcp
 pnpm agent                               # reads data/companies.csv, so it runs on a fresh clone
 ```
 
-The signal step needs `APIFY_TOKEN`. The Clay step ran through Clay's MCP server and is not scripted here.
+The signal step needs `APIFY_TOKEN` (copy `.env.example` to `.env`). The Clay step
+ran through Clay's MCP server and is not scripted here.
+
+## Fork it for your own ICP
+
+`/onboard` in Claude Code walks the whole setup: your ICP into `src/icp.ts`, your keys,
+the run order. About 15 minutes. Manual version: [.claude/skills/onboard/SKILL.md](.claude/skills/onboard/SKILL.md).
+
+A run costs about $4 in Apify credit. Failure modes and their fixes: [WHAT-BROKE.md](WHAT-BROKE.md).
+License: MIT for the code. The shipped lead data is real people and is not licensed for reuse; see [LICENSE.md](LICENSE.md).
